@@ -31,31 +31,31 @@ class VPINN:
     def __init__(self, X_u_train, u_train, X_quad, W_quad, F_exact_total,\
                  grid, X_test, u_test, layers, X_f_train, f_train):
 
-        self.x       = X_u_train
-        self.u       = u_train
-        self.xf      = X_f_train
-        self.f      = f_train
+        self.x       = X_u_train  # Dirichlet BC location
+        self.u       = u_train    # Dirichlet BC condition
+        self.xf      = X_f_train  # random points in the reference element
+        self.f       = f_train    # force term evaluated on random points
         self.xquad   = X_quad
         self.wquad   = W_quad
         self.xtest   = X_test
         self.utest   = u_test
-        self.F_ext_total = F_exact_total
+        self.F_ext_total = F_exact_total  # weak form (f,v) for all v on every element
         self.Nelement = np.shape(self.F_ext_total)[0]
         self.N_test   = np.shape(self.F_ext_total[0])[0]
         
         self.x_tf   = tf.placeholder(tf.float64, shape=[None, self.x.shape[1]])
         self.u_tf   = tf.placeholder(tf.float64, shape=[None, self.u.shape[1]])
-        self.xf_tf   = tf.placeholder(tf.float64, shape=[None, self.xf.shape[1]])
-        self.f_tf   = tf.placeholder(tf.float64, shape=[None, self.f.shape[1]])
+        self.xf_tf  = tf.placeholder(tf.float64, shape=[None, self.xf.shape[1]])    # never used for evaluation
+        self.f_tf   = tf.placeholder(tf.float64, shape=[None, self.f.shape[1]])     # never used for evaluation
         self.x_test = tf.placeholder(tf.float64, shape=[None, self.xtest.shape[1]])
         self.x_quad = tf.placeholder(tf.float64, shape=[None, self.xquad.shape[1]])
       
         self.weights, self.biases, self.a = self.initialize_NN(layers)
 
-        self.u_NN_quad  = self.net_u(self.x_quad)
-        self.d1u_NN_quad, self.d2u_NN_quad = self.net_du(self.x_quad)
-        self.test_quad   = self.Test_fcn(self.N_test, self.xquad)
-        self.d1test_quad, self.d2test_quad = self.dTest_fcn(self.N_test, self.xquad)
+        # self.u_NN_quad  = self.net_u(self.x_quad)
+        # self.d1u_NN_quad, self.d2u_NN_quad = self.net_du(self.x_quad)
+        # self.test_quad   = self.Test_fcn(self.N_test, self.xquad)
+        # self.d1test_quad, self.d2test_quad = self.dTest_fcn(self.N_test, self.xquad)
         
         self.u_NN_pred   = self.net_u(self.x_tf)
         self.u_NN_test   = self.net_u(self.x_test)
@@ -80,6 +80,7 @@ class VPINN:
 
 
             if var_form == 1:
+                # compute <dxx u, v> for all v and approximate <,> with numerical integration
                 U_NN_element = tf.reshape(tf.stack([-jacobian*tf.reduce_sum(self.wquad*d2u_NN_quad_element*test_quad_element[i]) \
                                                    for i in range(Ntest_element)]),(-1,1))
             if var_form == 2:
@@ -90,7 +91,7 @@ class VPINN:
                                                    +1/jacobian*tf.reduce_sum(u_NN_bound_element*np.array([-d1test_bound_element[i][0], d1test_bound_element[i][-1]]))  \
                                                    for i in range(Ntest_element)]),(-1,1))
                 
-
+            # residual r(v) = <dxx u,v> - <f,v> for all v on the current element
             Res_NN_element = U_NN_element - F_ext_element
             loss_element = tf.reduce_mean(tf.square(Res_NN_element))
             self.varloss_total = self.varloss_total + loss_element
@@ -123,7 +124,7 @@ class VPINN:
         in_dim = size[0]
         out_dim = size[1]        
         xavier_stddev = np.sqrt(2/(in_dim + out_dim), dtype=np.float64)
-        return tf.Variable(tf.truncated_normal([in_dim, out_dim], stddev=xavier_stddev,dtype=tf.float64), dtype=tf.float64)
+        return tf.Variable(tf.truncated_normal([in_dim, out_dim], stddev=xavier_stddev, dtype=tf.float64), dtype=tf.float64)
  
     def neural_net(self, X, weights, biases, a):
         num_layers = len(weights) + 1
@@ -228,15 +229,15 @@ if __name__ == "__main__":
 
     
     #++++++++++++++++++++++++++++
-    LR = 0.001
-    Opt_Niter = 1000 + 1
-    Opt_tresh = 2e-32
-    var_form  = 1
-    N_Element = 1
-    Net_layer = [1] + [20] * 4 + [1] 
-    N_testfcn = 60
-    N_Quad = 80
-    N_F = 500  
+    LR = 0.001                          # learning rate
+    Opt_Niter = 1000 + 1                # optimizer iterations
+    Opt_tresh = 2e-32                   # optimizer threshold
+    var_form  = 1                       # type of variational form used
+    N_Element = 1                       # number of elements
+    Net_layer = [1] + [20] * 4 + [1]    # network architecture
+    N_testfcn = 60                      # number of test functions (per element)
+    N_Quad = 80                         # number of quadrature points
+    N_F = 500                           # 
     lossb_weight = 1
         
     #++++++++++++++++++++++++++++    
@@ -249,17 +250,20 @@ if __name__ == "__main__":
     amp = 1
     r1 = 80
     def u_ext(x):
+        ''' Analytical solution. '''
         utemp = 0.1*np.sin(omega*x) + np.tanh(r1*x)
         return amp*utemp
 
     def f_ext(x):
+        ''' Force term resulting from the analytical solution. '''
         gtemp =  -0.1*(omega**2)*np.sin(omega*x) - (2*r1**2)*(np.tanh(r1*x))/((np.cosh(r1*x))**2)
         return -amp*gtemp
 
     #++++++++++++++++++++++++++++
+    # Quadrature points and weights
     NQ_u = N_Quad
     [x_quad, w_quad] = GaussLobattoJacobiWeights(NQ_u, 0, 0)
-    testfcn = np.asarray([ Test_fcn(n,x_quad)  for n in range(1, N_testfcn+1)])
+    # testfcn = np.asarray([ Test_fcn(n,x_quad)  for n in range(1, N_testfcn+1)])
     
     NE = N_Element
     [x_l, x_r] = [-1, 1]
@@ -272,7 +276,7 @@ if __name__ == "__main__":
         NE = len(grid)-1
         N_testfcn_total = np.array([N_testfcn,N_testfcn,N_testfcn])
     
-    U_ext_total = []
+    # U_ext_total = []
     F_ext_total = []
     for e in range(NE):
         x_quad_element = grid[e] + (grid[e+1]-grid[e])/2*(x_quad+1)
@@ -280,24 +284,24 @@ if __name__ == "__main__":
         N_testfcn_temp = N_testfcn_total[e]
         testfcn_element = np.asarray([ Test_fcn(n,x_quad)  for n in range(1, N_testfcn_temp+1)])
 
-        u_quad_element = u_ext(x_quad_element)
-        U_ext_element  = jacobian*np.asarray([sum(w_quad*u_quad_element*testfcn_element[i]) for i in range(N_testfcn_temp)])
-        U_ext_element = U_ext_element[:,None]
-        U_ext_total.append(U_ext_element)
+        # u_quad_element = u_ext(x_quad_element)
+        # U_ext_element  = jacobian*np.asarray([sum(w_quad*u_quad_element*testfcn_element[i]) for i in range(N_testfcn_temp)])
+        # U_ext_element = U_ext_element[:,None]
+        # U_ext_total.append(U_ext_element)
 
         f_quad_element = f_ext(x_quad_element)
         F_ext_element  = jacobian*np.asarray([sum(w_quad*f_quad_element*testfcn_element[i]) for i in range(N_testfcn_temp)])
         F_ext_element = F_ext_element[:,None]
         F_ext_total.append(F_ext_element)
     
-    U_ext_total = np.asarray(U_ext_total)
+    # U_ext_total = np.asarray(U_ext_total)
     F_ext_total = np.asarray(F_ext_total)
 
     #++++++++++++++++++++++++++++
-    # Training points
+    # Training points (Dirichlet BC ??)
     X_u_train = np.asarray([-1.0,1.0])[:,None]
     u_train   = u_ext(X_u_train)
-    X_bound = np.asarray([-1.0,1.0])[:,None]
+    # X_bound = np.asarray([-1.0,1.0])[:,None]
     
     Nf = N_F
     X_f_train = (2*lhs(1,Nf)-1)
@@ -305,13 +309,13 @@ if __name__ == "__main__":
 
     #++++++++++++++++++++++++++++
     # Quadrature points
-    [x_quad, w_quad] = GaussLobattoJacobiWeights(N_Quad, 0, 0)
+    # [x_quad, w_quad] = GaussLobattoJacobiWeights(N_Quad, 0, 0)  
 
     X_quad_train = x_quad[:,None]
     W_quad_train = w_quad[:,None]
 
     #++++++++++++++++++++++++++++
-    # Test point
+    # Test points (equally spaced in the physical domain [-1,1])
     delta_test = 0.001
     xtest      = np.arange(-1 , 1 + delta_test , delta_test)
     data_temp  = np.asarray([ [xtest[i],u_ext(xtest[i])] for i in range(len(xtest))])
@@ -319,14 +323,14 @@ if __name__ == "__main__":
     u_test = data_temp.flatten()[1::2]
     X_test = X_test[:,None]
     u_test = u_test[:,None]
-    f_test = f_ext(X_test)
+    # f_test = f_ext(X_test)
 
-    u_test_total = []
-    for e in range(NE):
-        x_test_element = grid[e] + (grid[e+1]-grid[e])/2*(xtest+1)
-        u_test_element = u_ext(x_test_element)
-        u_test_element = u_test_element[:,None]
-        u_test_total.append(u_test_element)
+    # u_test_total = []
+    # for e in range(NE):
+    #     x_test_element = grid[e] + (grid[e+1]-grid[e])/2*(xtest+1)
+    #     u_test_element = u_ext(x_test_element)
+    #     u_test_element = u_test_element[:,None]
+    #     u_test_total.append(u_test_element)
 
     #++++++++++++++++++++++++++++
     # Model and Training
